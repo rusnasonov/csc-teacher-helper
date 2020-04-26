@@ -3,8 +3,12 @@ package csc_teacher_helper
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.features.*
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.readText
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import java.lang.Exception
+import kotlin.system.exitProcess
 
 data class Comment(val author: String, val date: String)
 
@@ -12,7 +16,7 @@ class IsUserWriteComment(private val name: String, private val submission: Submi
     suspend fun check(): Boolean {
         return this.submission
                 .comments()
-                .filter { comment -> comment.author == this.name }
+                .filter { it.author == this.name }
                 .count() > 0
     }
 }
@@ -144,11 +148,17 @@ class Assignment(private val client: HttpClient, private val id: String) {
 
     private suspend fun page(): Document {
         if (!this::_page.isInitialized) {
-            val response = this.client.get<String> {
+            val response = this.client.get<HttpResponse> {
                 url(this@Assignment.assignmentUrl)
                 parameter("assignment", this@Assignment.id)
             }
-            this._page = Jsoup.parse(response)
+            when(response.status.value) {
+                200 -> this._page = Jsoup.parse(response.readText())
+                else -> throw Exception(response.status.description)
+            }
+            if (this._page.text().contains("Войдите на сайт, чтобы продолжить")) {
+                throw Exception("Обновите куку cscsessionid")
+            }
         }
         return this._page
     }
@@ -171,22 +181,29 @@ class Assignment(private val client: HttpClient, private val id: String) {
 }
 
 suspend fun main(args: Array<String>) {
-    val assignmentId = args[0]
-    val client = HttpClient() {
-        defaultRequest {
-            header("Cookie", "cscsessionid=${System.getenv("CSC_SESSION_ID")}")
+    try {
+
+        val assignmentId = args[0]
+        val client = HttpClient() {
+            defaultRequest {
+                header("Cookie", "cscsessionid=${System.getenv("CSC_SESSION_ID")}")
+            }
         }
+        val me = System.getenv("CSC_ME")
+        val assignment = Assignment(client, assignmentId)
+        val submissions = assignment.submissions()
+        val reports = listOf(
+                NeedMyReactionReport(submissions, me),
+                NeedStudentReactionReport(submissions, me),
+                NeedTeacherAssignmentReport(submissions, me),
+                StudentsWithGradeReport(submissions, me),
+                NeedStudentSolutionReport(submissions, me)
+        )
+        println(assignment.title())
+        reports.forEach { println(it.generate()); println("-".repeat(20)) }
     }
-    val me = System.getenv("CSC_ME")
-    val assignment = Assignment(client, assignmentId)
-    val submissions = assignment.submissions()
-    val reports = listOf(
-            NeedMyReactionReport(submissions, me),
-            NeedStudentReactionReport(submissions, me),
-            NeedTeacherAssignmentReport(submissions, me),
-            StudentsWithGradeReport(submissions, me),
-            NeedStudentSolutionReport(submissions, me)
-    )
-    println(assignment.title())
-    reports.forEach{ println(it.generate()); println("-".repeat(20))}
+    catch (e: Exception) {
+        System.err.println(e.message)
+        exitProcess(1)
+    }
 }
