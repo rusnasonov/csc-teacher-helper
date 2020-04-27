@@ -83,6 +83,14 @@ class StudentsWithGradeReport(private val submissions: List<Submission>, private
     }
 }
 
+class MyStudentsCountReport(private val submissions: List<Submission>, private val me: String) : Report {
+    override suspend fun generate(): String {
+        return "My students count: ${this.submissions
+                .filter { IsUserWriteComment(this.me, it).check() }
+                .count()}"
+    }
+}
+
 class Submission(private val client: HttpClient, private val url: String) {
     private lateinit var _page: Document
 
@@ -193,6 +201,7 @@ suspend fun main(args: Array<String>) {
         val assignment = Assignment(client, assignmentId)
         val submissions = assignment.submissions()
         val reports = listOf(
+                MyStudentsCountReport(submissions, me),
                 NeedMyReactionReport(submissions, me),
                 NeedStudentReactionReport(submissions, me),
                 NeedTeacherAssignmentReport(submissions, me),
